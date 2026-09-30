@@ -1,0 +1,14 @@
+# clang-format (22) doesn't understand C++26 reflection syntax yet
+# (`template for`, `[[=annotation]]`), so the style is kept by hand:
+# 4-space indent, attached braces, short functions on one line.
+root = true
+
+[*]
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+charset = utf-8
+
+[*.{cpp,hpp,h,txt,cmake}]
+indent_style = space
+indent_size = 4
