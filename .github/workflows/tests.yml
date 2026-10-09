@@ -1,0 +1,31 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    # reflection needs GCC 16, newer than what the runners have
+    container: gcc:16
+    env:
+      CMAKE_VERSION: 4.3.4
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install CMake
+        run: |
+          curl -fsSL "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" \
+            | tar -xz -C /usr/local --strip-components=1
+          cmake --version
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --no-tests=error
