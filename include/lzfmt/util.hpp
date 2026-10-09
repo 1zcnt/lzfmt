@@ -28,6 +28,18 @@
 
 namespace lz::fmt {
 
+// like std::meta::annotations_of_with_type, for annotations of any
+// specialization of the class template templ
+consteval std::vector<std::meta::info> annotations_of_with_template(std::meta::info item, std::meta::info templ) {
+    std::vector<std::meta::info> result;
+    for (auto a : annotations_of(item)) {
+        auto t = dealias(remove_cv(type_of(a)));
+        if (has_template_arguments(t) and template_of(t) == templ)
+            result.push_back(a);
+    }
+    return result;
+}
+
 // a range as a stream buffer: constexpr, and of any element type
 template <std::input_or_output_iterator It, std::sentinel_for<It> S, typename E>
 class range_buf {

@@ -235,6 +235,12 @@ concept overridden = not std::same_as<R, no_callback>;
 
 }
 
+template <typename Ctx>
+struct hook { };
+
+#define TRY_HOOK(Ctx, Fmt, Fn) \
+    std::conditional_t<requires { hook<Ctx>::Fn; }, hook<Ctx>, Fmt>::Fn
+
 template <auto P, typename T, template <auto, typename> typename Derived>
 struct base_formatter {
     static consteval std::vector<std::meta::info> members()  { return {}; }
@@ -410,23 +416,25 @@ public:
     static constexpr void read(Ctx ctx) {
         using F = fmt_of<Ctx>;
 
-        F::on_stream(ctx);
+        TRY_HOOK(Ctx, F, on_stream(ctx));
+
         if (!each_member<F>(ctx, [](auto c) { read(c); }))
             return;
-        F::read(ctx.value, ctx);
+
+        TRY_HOOK(Ctx, F, read(ctx.value, ctx));
         if (proceeds(ctx))
-            F::on_value(ctx);
+            TRY_HOOK(Ctx, F, on_value(ctx));
     }
 
     template <typename Ctx>
         requires (formatter_for(Ctx::type) != info{} and writable<Ctx>())
     static constexpr void write(Ctx ctx) {
         using F = fmt_of<Ctx>;
-        using V = std::remove_cv_t<typename Ctx::value_type>;
+        using T = [: Ctx::type :];
 
         if constexpr (std::is_const_v<typename Ctx::value_type> and
-                      overridden<decltype(F::on_value(ctx.with(std::declval<V &>())))>) {
-            V copy = ctx.value;
+                      overridden<decltype(TRY_HOOK(Ctx, F, on_value(ctx.with(std::declval<T &>()))))>) {
+            T copy = ctx.value;
             write_value<F>(ctx.with(copy));
         } else
             write_value<F>(ctx);
@@ -435,10 +443,10 @@ public:
 private:
     template <typename F, typename Ctx>
     static constexpr void write_value(Ctx ctx) {
-        F::on_value(ctx);
-        F::write(std::as_const(ctx.value), ctx);
+        TRY_HOOK(Ctx, F, on_value(ctx));
+        TRY_HOOK(Ctx, F, write(std::as_const(ctx.value), ctx));
         if (proceeds(ctx) and each_member<F>(ctx, [](auto c) { write(c); }))
-            F::on_stream(ctx);
+            TRY_HOOK(Ctx, F, on_stream(ctx));
     }
 
     template <typename Ctx>
