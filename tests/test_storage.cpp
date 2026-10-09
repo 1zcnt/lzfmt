@@ -7,8 +7,7 @@ template <auto P, std::same_as<tick> T>
 struct tick_formatter : lz::fmt::base_formatter<P, T, tick_formatter> {
     using storage_t = std::uint8_t;
 
-    template <typename Ctx>
-    static constexpr void fmt(Ctx ctx) {
+    static constexpr void write(const T &, auto ctx) {
         auto n = ++ctx.template get_storage<tick_formatter>();
         ctx.r.put(n);
     }
@@ -25,8 +24,7 @@ template <auto P, typename T> requires is_tagged<T>
 struct tagged_formatter : lz::fmt::base_formatter<P, T, tagged_formatter> {
     using storage_t = std::uint8_t;
 
-    template <typename Ctx>
-    static constexpr void fmt(Ctx ctx) {
+    static constexpr void write(const T &, auto ctx) {
         ctx.r.put(++ctx.template get_storage<tagged_formatter>());
     }
 };
@@ -44,22 +42,27 @@ template <auto P, std::same_as<length> T>
 struct length_formatter : lz::fmt::base_formatter<P, T, length_formatter> {
     using storage_t = std::size_t;
 
-    template <typename Ctx>
-    static constexpr void fmt(Ctx ctx) {
-        ctx.fmt(ctx.value.n);
-        ctx.template get_storage<length_formatter>() = ctx.value.n;
+    static constexpr void read(T &len, auto ctx) {
+        ctx.read(len.n);
+        ctx.template get_storage<length_formatter>() = len.n;
+    }
+
+    static constexpr void write(const T &len, auto ctx) {
+        ctx.write(len.n);
     }
 };
 
 template <auto P, std::same_as<payload> T>
 struct payload_formatter : lz::fmt::base_formatter<P, T, payload_formatter> {
-    template <typename Ctx>
-    static constexpr void fmt(Ctx ctx) {
-        lz::fmt::direction_split(ctx, [](auto c) {
-            c.value.bytes.resize(c.template get_storage<length_formatter<P, length>>());
-        });
-        for (auto &b : ctx.value.bytes)
-            ctx.fmt(b);
+    static constexpr void read(T &p, auto ctx) {
+        p.bytes.resize(ctx.template get_storage<length_formatter<P, length>>());
+        for (auto &b : p.bytes)
+            ctx.read(b);
+    }
+
+    static constexpr void write(const T &p, auto ctx) {
+        for (auto &b : p.bytes)
+            ctx.write(b);
     }
 };
 
@@ -93,7 +96,7 @@ using fmt = lz::fmt::binfmt<params{}, tick_formatter, tagged_formatter, length_f
 template <typename T, std::size_t N = 3>
 static auto format(const T &v) {
     std::array<std::uint8_t, N> out{};
-    fmt::format(v, out);
+    fmt::write(v, sb(out));
     return out;
 }
 
@@ -113,7 +116,7 @@ static void per_specialization() {
     CHECK(format(mixed_tags{}) == bytes(1, 1, 2));
 }
 
-// storage reaches values formatted as range elements, through ctx.fmt()
+// storage reaches values formatted as range elements, through ctx.write()
 static void through_ranges() {
     CHECK(format(std::vector<tick>(3)) == bytes(1, 2, 3));
 }
@@ -127,22 +130,22 @@ static void recursive() {
 // one formatter can read what another stored
 static void between_formatters() {
     packet p{};
-    CHECK(fmt::parse(p, bytes(3, 7, 8, 9, 10)) == 4);
+    CHECK(fmt::read(p, sb(bytes(3, 7, 8, 9, 10))) == 4);
     CHECK(p.len.n == 3 and p.data.bytes == std::vector<std::uint8_t>{7, 8, 9});
 }
 
 // only formatters with a storage_t get storage, each once
 static void only_formatters_with_storage() {
-    static_assert(std::tuple_size_v<fmt::root::storage_for<plain>> == 0);
-    static_assert(std::tuple_size_v<fmt::root::storage_for<three_ticks>> == 1);
-    static_assert(std::tuple_size_v<fmt::root::storage_for<mixed_tags>> == 2);
-    static_assert(std::tuple_size_v<fmt::root::storage_for<packet>> == 1);
+    static_assert(std::tuple_size_v<fmt::storage_for<plain>> == 0);
+    static_assert(std::tuple_size_v<fmt::storage_for<three_ticks>> == 1);
+    static_assert(std::tuple_size_v<fmt::storage_for<mixed_tags>> == 2);
+    static_assert(std::tuple_size_v<fmt::storage_for<packet>> == 1);
 }
 
 // storage works in constant evaluation
 static_assert([] {
     std::array<std::uint8_t, 3> out{};
-    fmt::format(three_ticks{}, out);
+    fmt::write(three_ticks{}, sb(out));
     return out == bytes(1, 2, 3);
 }());
 

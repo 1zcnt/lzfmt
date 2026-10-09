@@ -8,8 +8,7 @@ struct opaque {
 
 template <auto P, std::same_as<opaque> T>
 struct opaque_formatter : lz::fmt::class_formatter<P, T> {
-    template <typename Ctx>
-    static constexpr void pre_fmt(Ctx ctx) { ctx.action = visit::next; }
+    static constexpr void on_stream(auto ctx) { ctx.action = visit::next; }
 };
 
 struct terminator {
@@ -18,10 +17,15 @@ struct terminator {
 
 template <auto P, std::same_as<terminator> T>
 struct terminator_formatter : lz::fmt::base_formatter<P, T, terminator_formatter> {
-    template <typename Ctx>
-    static constexpr void fmt(Ctx ctx) {
-        ctx.fmt(ctx.value.v);
-        if (ctx.value.v == 0)
+    static constexpr void read(T &t, auto ctx) {
+        ctx.read(t.v);
+        if (t.v == 0)
+            ctx.action = visit::step_up;
+    }
+
+    static constexpr void write(const T &t, auto ctx) {
+        ctx.write(t.v);
+        if (t.v == 0)
             ctx.action = visit::step_up;
     }
 };
@@ -30,8 +34,8 @@ struct halt { };
 
 template <auto P, std::same_as<halt> T>
 struct halt_formatter : lz::fmt::base_formatter<P, T, halt_formatter> {
-    template <typename Ctx>
-    static constexpr void fmt(Ctx ctx) { ctx.action = visit::stop; }
+    static constexpr void read(T &, auto ctx)        { ctx.action = visit::stop; }
+    static constexpr void write(const T &, auto ctx) { ctx.action = visit::stop; }
 };
 
 struct record {
@@ -40,15 +44,15 @@ struct record {
     std::uint8_t b;
 };
 
-// a record, formatted through ctx.fmt() rather than as members
+// a record, formatted through ctx.read() and ctx.write() rather than as members
 struct wrapper {
     record r;
 };
 
 template <auto P, std::same_as<wrapper> T>
 struct wrapper_formatter : lz::fmt::base_formatter<P, T, wrapper_formatter> {
-    template <typename Ctx>
-    static constexpr void fmt(Ctx ctx) { ctx.fmt(ctx.value.r); }
+    static constexpr void read(T &w, auto ctx)        { ctx.read(w.r); }
+    static constexpr void write(const T &w, auto ctx) { ctx.write(w.r); }
 };
 
 struct opaques_then_byte {
@@ -93,22 +97,22 @@ using fmt = lz::fmt::binfmt<params{}, opaque_formatter, terminator_formatter, ha
 static void next_in_range() {
     opaques_then_byte v{std::vector<opaque>(3), 0};
 
-    CHECK(fmt::parse(v, bytes(7)) == 1 and v.after == 7 and v.v[0].x == 0);
+    CHECK(fmt::read(v, sb(bytes(7))) == 1 and v.after == 7 and v.v[0].x == 0);
 }
 
 // step_up in a nested object doesn't skip the rest of the enclosing one
 static void step_up_nested() {
     record_then_byte v{};
 
-    CHECK(fmt::parse(v, bytes(1, 0, 9)) == 3);
+    CHECK(fmt::read(v, sb(bytes(1, 0, 9))) == 3);
     CHECK(v.r.a == 1 and v.r.b == 0 and v.after == 9);
 }
 
-// step_up inside a value formatted with ctx.fmt() stays inside it
-static void step_up_through_ctx_fmt() {
+// step_up inside a value read with ctx.read() stays inside it
+static void step_up_through_ctx_read() {
     wrapper_then_byte v{};
 
-    CHECK(fmt::parse(v, bytes(1, 0, 9)) == 3);
+    CHECK(fmt::read(v, sb(bytes(1, 0, 9))) == 3);
     CHECK(v.w.r.a == 1 and v.w.r.b == 0 and v.after == 9);
 }
 
@@ -116,7 +120,7 @@ static void step_up_through_ctx_fmt() {
 static void stop_ends_everything() {
     halting_then_byte v{};
 
-    CHECK(fmt::parse(v, bytes(1, 2, 3)) == 1);
+    CHECK(fmt::read(v, sb(bytes(1, 2, 3))) == 1);
     CHECK(v.in.a == 1 and v.in.b == 0 and v.after == 0);
 }
 
@@ -124,20 +128,20 @@ static void stop_ends_everything() {
 static void stop_through_range() {
     halting_elems_then_byte v{std::vector<halting_elem>(2), 0};
 
-    CHECK(fmt::parse(v, bytes(1, 2, 3)) == 1);
+    CHECK(fmt::read(v, sb(bytes(1, 2, 3))) == 1);
     CHECK(v.v[0].a == 1 and v.v[1].a == 0 and v.after == 0);
 }
 
 // formatting follows the same actions as parsing
 static void format_follows_actions() {
     std::array<std::uint8_t, 4> out{};
-    CHECK(fmt::format(record{1, {0}, 2}, out) == 2 and out == bytes(1, 0, 0, 0));
+    CHECK(fmt::write(record{1, {0}, 2}, sb(out)) == 2 and out == bytes(1, 0, 0, 0));
 }
 
 int main() {
     next_in_range();
     step_up_nested();
-    step_up_through_ctx_fmt();
+    step_up_through_ctx_read();
     stop_ends_everything();
     stop_through_range();
     format_follows_actions();

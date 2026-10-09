@@ -3,23 +3,15 @@
 // a byte, written twice; parsed from the first
 template <auto P, std::same_as<std::uint8_t> T>
 struct doubled_formatter : lz::fmt::base_formatter<P, T, doubled_formatter> {
-    template <typename Ctx>
-    static constexpr void fmt(Ctx ctx) {
-        lz::fmt::direction_split(ctx,
-            [](auto c) { c.value = c.r.get(); c.r.get(); },
-            [](auto c) { c.r.put(c.value); c.r.put(c.value); });
-    }
+    static constexpr void read(T &v, auto ctx)        { v = ctx.r.get(); ctx.r.get(); }
+    static constexpr void write(const T &v, auto ctx) { ctx.r.put(v); ctx.r.put(v); }
 };
 
 // a byte, written with its complement
 template <auto P, std::same_as<std::uint8_t> T>
 struct checked_formatter : lz::fmt::base_formatter<P, T, checked_formatter> {
-    template <typename Ctx>
-    static constexpr void fmt(Ctx ctx) {
-        lz::fmt::direction_split(ctx,
-            [](auto c) { c.value = c.r.get(); c.r.get(); },
-            [](auto c) { c.r.put(c.value); c.r.put(static_cast<std::uint8_t>(~c.value)); });
-    }
+    static constexpr void read(T &v, auto ctx)        { v = ctx.r.get(); ctx.r.get(); }
+    static constexpr void write(const T &v, auto ctx) { ctx.r.put(v); ctx.r.put(static_cast<std::uint8_t>(~v)); }
 };
 
 template <auto P, std::same_as<std::uint8_t> T>
@@ -31,7 +23,7 @@ struct [[=lz::fmt::priority::impl(1)]] late_doubled_formatter : doubled_formatte
 template <template <auto, typename> typename... Fmts>
 static auto format_byte(std::uint8_t v) {
     std::array<std::uint8_t, 2> out{};
-    lz::fmt::binfmt<params{}, Fmts...>::format(v, out);
+    lz::fmt::binfmt<params{}, Fmts...>::write(v, sb(out));
     return out;
 }
 

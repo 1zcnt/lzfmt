@@ -10,15 +10,15 @@ static void integers() {
     std::uint64_t u64;
     std::int32_t  i32;
 
-    CHECK(le::parse(u8, bytes(0xab)) == 1 and u8 == 0xab);
-    CHECK(le::parse(u16, bytes(1, 2)) == 2 and u16 == 0x0201);
-    CHECK(le::parse(u32, bytes(1, 2, 3, 4)) == 4 and u32 == 0x04030201);
-    CHECK(le::parse(u64, bytes(1, 2, 3, 4, 5, 6, 7, 8)) == 8 and u64 == 0x0807060504030201);
-    CHECK(le::parse(i32, bytes(0xff, 0xff, 0xff, 0xff)) == 4 and i32 == -1);
+    CHECK(le::read(u8, sb(bytes(0xab))) == 1 and u8 == 0xab);
+    CHECK(le::read(u16, sb(bytes(1, 2))) == 2 and u16 == 0x0201);
+    CHECK(le::read(u32, sb(bytes(1, 2, 3, 4))) == 4 and u32 == 0x04030201);
+    CHECK(le::read(u64, sb(bytes(1, 2, 3, 4, 5, 6, 7, 8))) == 8 and u64 == 0x0807060504030201);
+    CHECK(le::read(i32, sb(bytes(0xff, 0xff, 0xff, 0xff))) == 4 and i32 == -1);
 
     std::array<std::uint8_t, 4> out{};
-    CHECK(le::format(std::uint32_t{0x0a0b0c0d}, out) == 4 and out == bytes(0x0d, 0x0c, 0x0b, 0x0a));
-    CHECK(le::format(std::int16_t{-2}, out) == 2 and out[0] == 0xfe and out[1] == 0xff);
+    CHECK(le::write(std::uint32_t{0x0a0b0c0d}, sb(out)) == 4 and out == bytes(0x0d, 0x0c, 0x0b, 0x0a));
+    CHECK(le::write(std::int16_t{-2}, sb(out)) == 2 and out[0] == 0xfe and out[1] == 0xff);
 }
 
 // floating point values are stored as their bit pattern
@@ -27,11 +27,11 @@ static void floats() {
     float  f = 0;
     double d = 0;
 
-    CHECK(le::format(1.5f, buf) == 4);
-    CHECK(le::parse(f, buf) == 4 and f == 1.5f);
+    CHECK(le::write(1.5f, sb(buf)) == 4);
+    CHECK(le::read(f, sb(buf)) == 4 and f == 1.5f);
 
-    CHECK(le::format(-0.25, buf) == 8);
-    CHECK(le::parse(d, buf) == 8 and d == -0.25);
+    CHECK(le::write(-0.25, sb(buf)) == 8);
+    CHECK(le::read(d, sb(buf)) == 8 and d == -0.25);
 }
 
 // bool, char and std::byte are single bytes
@@ -40,18 +40,18 @@ static void single_bytes() {
     char      c = 0;
     std::byte y{};
 
-    CHECK(le::parse(b, bytes(1)) == 1 and b);
-    CHECK(le::parse(c, bytes('x')) == 1 and c == 'x');
-    CHECK(le::parse(y, bytes(0x5a)) == 1 and y == std::byte{0x5a});
+    CHECK(le::read(b, sb(bytes(1))) == 1 and b);
+    CHECK(le::read(c, sb(bytes('x'))) == 1 and c == 'x');
+    CHECK(le::read(y, sb(bytes(0x5a))) == 1 and y == std::byte{0x5a});
 }
 
 // enums are formatted as their underlying type only when enum_is_integral is set
 static void enums() {
     color c{};
-    CHECK(le::parse(c, bytes(2, 1)) == 2 and c == color::red);
+    CHECK(le::read(c, sb(bytes(2, 1))) == 2 and c == color::red);
 
     std::array<std::uint8_t, 2> out{};
-    CHECK(le::format(color::red, out) == 2 and out == bytes(2, 1));
+    CHECK(le::write(color::red, sb(out)) == 2 and out == bytes(2, 1));
 
     static_assert(!lz::fmt::binfmt<params{.enum_is_integral = false}>::check_type(^^color));
 }

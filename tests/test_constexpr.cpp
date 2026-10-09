@@ -9,12 +9,12 @@ struct packet {
 // parsing and formatting work in constant evaluation
 static_assert([] {
     std::array<std::uint8_t, 5> buf{};
-    le::format(packet{1, 0x0302, {4, 5}}, buf);
+    le::write(packet{1, 0x0302, {4, 5}}, sb(buf));
     if (buf != bytes(1, 2, 3, 4, 5))
         return false;
 
     packet p{};
-    return le::parse(p, buf) == 5 and p.kind == 1 and p.len == 0x0302 and p.data[1] == 5;
+    return le::read(p, sb(buf)) == 5 and p.kind == 1 and p.len == 0x0302 and p.data[1] == 5;
 }());
 
 // running out of input isn't a constant expression
@@ -22,7 +22,7 @@ template <std::size_t N>
 constexpr bool parses() {
     std::array<std::uint8_t, N> buf{};
     packet p{};
-    return le::parse(p, buf) == 5;
+    return le::read(p, sb(buf)) == 5;
 }
 
 template <std::size_t N>

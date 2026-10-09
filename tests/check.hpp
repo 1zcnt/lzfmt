@@ -1,6 +1,7 @@
 #pragma once
 
 #include <lzfmt/binfmt.hpp>
+#include <lzfmt/util.hpp>
 
 #include <cstdio>
 
@@ -34,11 +35,18 @@ struct params {
 using le = lz::fmt::binfmt<params{}>;
 using be = lz::fmt::binfmt<params{std::endian::big}>;
 
-template <typename F, typename T, typename Rg>
-concept can_parse = requires(T &v, Rg &r) { F::parse(v, r); };
+// the stream buffer of a range, a stream or a stream buffer.
+// one over a temporary range lasts until the end of the full expression
+template <typename S>
+constexpr auto sb(S &&s) -> decltype(lz::fmt::stream_buffer(s)) {
+    return lz::fmt::stream_buffer(s);
+}
 
-template <typename F, typename T, typename Rg>
-concept can_format = requires(const T &v, Rg &r) { F::format(v, r); };
+template <typename F, typename T, typename S>
+concept can_parse = requires(T &v, S &s) { F::read(v, sb(s)); };
+
+template <typename F, typename T, typename S>
+concept can_format = requires(const T &v, S &s) { F::write(v, sb(s)); };
 
 template <typename... T>
 constexpr auto bytes(T... v) {

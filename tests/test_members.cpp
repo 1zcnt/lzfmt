@@ -52,14 +52,14 @@ struct flags_formatter {
 // members are formatted in the order members() lists them
 static void reordered() {
     pair2 p;
-    CHECK(lz::fmt::binfmt<params{}, reversed_formatter>::parse(p, bytes(1, 2)) == 2);
+    CHECK(lz::fmt::binfmt<params{}, reversed_formatter>::read(p, sb(bytes(1, 2))) == 2);
     CHECK(p.a == 2 and p.b == 1);
 }
 
 // members left out of members() aren't formatted
 static void subset() {
     pair2 p{};
-    CHECK(lz::fmt::binfmt<params{}, only_b_formatter>::parse(p, bytes(1, 2)) == 1);
+    CHECK(lz::fmt::binfmt<params{}, only_b_formatter>::read(p, sb(bytes(1, 2))) == 1);
     CHECK(p.a == 0 and p.b == 1);
 }
 
@@ -68,11 +68,11 @@ static void arbitrary_members() {
     using fmt = lz::fmt::binfmt<params{}, indexed_formatter>;
 
     words v{};
-    CHECK(fmt::parse(v, bytes(1, 0, 2, 0)) == 4);
+    CHECK(fmt::read(v, sb(bytes(1, 0, 2, 0))) == 4);
     CHECK(v.w == std::array<std::uint16_t, 3>{2, 0, 1});
 
     std::array<std::uint8_t, 4> out{};
-    CHECK(fmt::format(words{{7, 8, 9}}, out) == 4 and out == bytes(9, 0, 7, 0));
+    CHECK(fmt::write(words{{7, 8, 9}}, sb(out)) == 4 and out == bytes(9, 0, 7, 0));
 }
 
 // a formatter is only used if every type it requires can be formatted

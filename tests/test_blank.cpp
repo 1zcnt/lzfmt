@@ -3,6 +3,7 @@
 #include <print>
 
 #include "lzfmt/binfmt.hpp"
+#include "lzfmt/util.hpp"
 
 struct aboba {
     uint16_t a;
@@ -23,7 +24,7 @@ int main() {
     using Fmt = lz::fmt::binfmt<cfg{}>;
     aboba a;
 
-    Fmt::parse(a, x);
+    Fmt::read(a, lz::fmt::stream_buffer(x));
 
     std::println("{} {} {}", a.a, a.bc.b, a.bc.c);
 

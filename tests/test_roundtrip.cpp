@@ -38,11 +38,11 @@ template <typename F>
 static void roundtrip() {
     auto m = make();
     std::vector<std::uint8_t> buf(message_size);
-    CHECK(F::format(m, buf) == message_size);
+    CHECK(F::write(m, sb(buf)) == message_size);
 
     message back{};
     back.words.resize(3);
-    CHECK(F::parse(back, buf) == message_size);
+    CHECK(F::read(back, sb(buf)) == message_size);
     CHECK(back == m);
 }
 
@@ -50,8 +50,8 @@ static void roundtrip() {
 static void byte_orders_differ() {
     auto m = make();
     std::vector<std::uint8_t> l(message_size), b(message_size);
-    le::format(m, l);
-    be::format(m, b);
+    le::write(m, sb(l));
+    be::write(m, sb(b));
     CHECK(l[0] == b[0] and l[1] == b[2] and l[2] == b[1]);
     CHECK(l.back() == b.back());
 }
@@ -60,7 +60,7 @@ static void byte_orders_differ() {
 static void format_leaves_value() {
     auto m = make();
     std::vector<std::uint8_t> buf(message_size);
-    be::format(m, buf);
+    be::write(m, sb(buf));
     CHECK(m == make());
 }
 
