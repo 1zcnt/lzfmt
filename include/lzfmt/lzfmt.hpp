@@ -6,11 +6,11 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <ios>
 #include <iterator>
 #include <limits>
 #include <meta>
 #include <ranges>
-#include <span>
 #include <stdexcept>
 #include <string_view>
 #include <tuple>
@@ -19,8 +19,6 @@
 #include <vector>
 
 namespace lz::fmt {
-
-enum class fmt_direction { parse_value, format_value };
 
 struct params {
     std::endian endianness       = std::endian::native;
@@ -87,166 +85,66 @@ enum class visit {
 };
 
 namespace detail {
-struct no_callback {
-    constexpr no_callback operator()(auto) const { return {}; }
-};
+struct no_callback { };
 
 
 // formatter
 
 
-template <std::input_or_output_iterator It, std::sentinel_for<It> S, typename E>
+// what a cursor needs of std::basic_streambuf, so other types can stand in for it
+template <typename Sb>
+concept input_streambuf = requires(Sb &sb, typename Sb::char_type *p, std::streamsize n) {
+    { sb.sgetn(p, n) } -> std::convertible_to<std::streamsize>;
+};
+
+template <typename Sb>
+concept output_streambuf = requires(Sb &sb, const typename Sb::char_type *p, std::streamsize n) {
+    { sb.sputn(p, n) } -> std::convertible_to<std::streamsize>;
+};
+
+template <typename Sb>
+concept streambuf_like = input_streambuf<Sb> or output_streambuf<Sb>;
+
+template <streambuf_like Sb>
 class cursor {
-    // stepping past an element of a one-pass stream may block waiting for the
-    // next one: step only when needed, so a value can be the stream's last
-    static constexpr bool lazy = std::input_iterator<It> and not std::forward_iterator<It>;
-    static constexpr bool sized = std::forward_iterator<It> and std::sized_sentinel_for<S, It>;
-
-    It          it_;
-    S           end_;
-    std::size_t pos_     = 0;
-    bool        pending_ = false;   // lazy: it_ is at the element read last
-
-    std::span<const E> ahead_;
-
-    constexpr bool has_ahead() const {
-        return !ahead_.empty();
-    }
-
-    constexpr void settle() {
-        if constexpr (lazy)
-            if (std::exchange(pending_, false))
-                ++it_;
-    }
-
-    constexpr void require(std::size_t n) const {
-        if constexpr (sized)
-            if (std::cmp_less(end_ - it_, n))
-                throw std::length_error("EOF");
-    }
+    Sb         &sb_;
+    std::size_t pos_ = 0;
 
 public:
-    using value_type = E;
+    using value_type = Sb::char_type;
 
-    static constexpr bool contiguous = std::contiguous_iterator<It> and std::sized_sentinel_for<S, It>;
-
-    constexpr cursor(It it, S end) : it_(std::move(it)), end_(std::move(end)) { }
-
-    [[nodiscard]] constexpr auto rest() const requires contiguous {
-        return std::span(std::to_address(it_), static_cast<std::size_t>(end_ - it_));
-    }
-
-    constexpr void skip(std::size_t n) requires sized {
-        require(n);
-        it_ += static_cast<std::iter_difference_t<It>>(n);
-        pos_ += n;
-    }
+    constexpr explicit cursor(Sb &sb) : sb_(sb) { }
 
     [[nodiscard]] constexpr std::size_t position() const { return pos_; }
 
-    [[nodiscard]] constexpr bool at_end() {
-        if (has_ahead())
-            return false;
-        settle();
-        return it_ == end_;
+    constexpr std::size_t read_some(value_type *out, std::size_t n) {
+        auto got = static_cast<std::size_t>(sb_.sgetn(out, static_cast<std::streamsize>(n)));
+        pos_ += got;
+        return got;
     }
 
-    constexpr E get() {
-        if (has_ahead()) {
-            E v = ahead_[0];
-            ahead_ = ahead_.subspan(1);
-            ++pos_;
-            return v;
-        }
-
-        if (at_end())
+    constexpr void read(value_type *out, std::size_t n) {
+        if (read_some(out, n) != n)
             throw std::length_error("EOF");
-        E v = *it_;
-        if constexpr (lazy) pending_ = true;
-        else                ++it_;
-        ++pos_;
+    }
+
+    constexpr void write(const value_type *in, std::size_t n) {
+        auto put = static_cast<std::size_t>(sb_.sputn(in, static_cast<std::streamsize>(n)));
+        pos_ += put;
+        if (put != n)
+            throw std::length_error("EOF");
+    }
+
+    constexpr value_type get() {
+        value_type v{};
+        read(&v, 1);
         return v;
     }
 
-    constexpr void put(const E &v) {
-        if (it_ == end_)
-            throw std::length_error("EOF");
-        *it_ = v;
-        ++it_;
-        ++pos_;
-    }
-
-    constexpr void read(E *out, std::size_t n) {
-        if (has_ahead()) {
-            for (std::size_t i = 0; i < n; ++i)
-                out[i] = get();
-        } else if constexpr (sized) {
-            require(n);
-            it_ = std::ranges::copy_n(std::move(it_), static_cast<std::iter_difference_t<It>>(n), out).in;
-            pos_ += n;
-        } else {
-            for (std::size_t i = 0; i < n; ++i)
-                out[i] = get();
-        }
-    }
-
-    constexpr std::size_t read_some(E *out, std::size_t n) {
-        if constexpr (sized) {
-            if (!has_ahead()) {
-                n = std::min(n, static_cast<std::size_t>(end_ - it_));
-                read(out, n);
-                return n;
-            }
-        }
-        std::size_t i = 0;
-        for (; i < n and !at_end(); ++i)
-            out[i] = get();
-        return i;
-    }
-
-    constexpr void set_ahead(std::span<const E> last) {
-        if (has_ahead())
-            throw std::runtime_error("set_ahead: cursor still has ahead buffer");
-        ahead_ = last;
-        pos_ -= last.size();
-    }
-
-    constexpr void write(const E *in, std::size_t n) {
-        if constexpr (sized) {
-            require(n);
-            it_ = std::ranges::copy_n(in, static_cast<std::iter_difference_t<It>>(n), std::move(it_)).out;
-            pos_ += n;
-        } else {
-            for (std::size_t i = 0; i < n; ++i)
-                put(in[i]);
-        }
+    constexpr void put(const value_type &v) {
+        write(&v, 1);
     }
 };
-
-// output-only ranges have no value type
-template <typename Rg>
-struct buffer_element { using type = std::byte; };
-template <typename Rg>
-    requires requires { typename std::ranges::range_value_t<Rg>; }
-struct buffer_element<Rg> { using type = std::ranges::range_value_t<Rg>; };
-
-template <typename Rg>
-using buffer_element_t = buffer_element<std::remove_reference_t<Rg>>::type;
-
-template <typename Rg>
-using cursor_for = cursor<std::ranges::iterator_t<Rg>, std::ranges::sentinel_t<Rg>, buffer_element_t<Rg>>;
-
-template <typename Rg>
-constexpr auto make_cursor(Rg &r) {
-    return cursor_for<Rg &>{std::ranges::begin(r), std::ranges::end(r)};
-}
-
-template <typename Rg>
-    requires std::ranges::contiguous_range<std::ranges::range_value_t<Rg>>
-constexpr auto make_cursor(Rg &r) {
-    auto view = r | std::views::join;
-    return cursor_for<Rg &>{std::ranges::begin(view), std::ranges::end(view)};
-}
 
 template <typename F>
 struct storage_entry {
@@ -260,7 +158,6 @@ inline constexpr bool has_storage<F> = true;
 
 template <
     typename Root,
-    fmt_direction D,
     typename T,
     info Subject,
     typename Cursor,
@@ -271,12 +168,8 @@ struct formatter_context {
     using value_type  = T;
     using buffer_type = Cursor;
 
-    static constexpr fmt_direction      direction = D;
     static constexpr info               type      = clean(^^T);
     static constexpr info               subject   = Subject;
-
-    using mutable_type = formatter_context<Root, D, std::remove_cv_t<T>, Subject, Cursor, Entries...>;
-    using const_type   = formatter_context<Root, D, const T, Subject, Cursor, Entries...>;
 
     T                       &value;
     Cursor                  &r;
@@ -290,16 +183,27 @@ struct formatter_context {
 
     template <info S = Subject, typename U>
     constexpr auto with(U &v, visit &a) const {
-        return formatter_context<Root, D, U, S, Cursor, Entries...>{v, r, a, storage};
+        return formatter_context<Root, U, S, Cursor, Entries...>{v, r, a, storage};
     }
 
     template <typename U>
-    constexpr void fmt(U &v) const {
+    constexpr void read(U &v) const {
+        nested(v, [](auto c) { root::read(c); });
+    }
+
+    template <typename U>
+    constexpr void write(const U &v) const {
+        nested(v, [](auto c) { root::write(c); });
+    }
+
+    // v is a value of its own: of what its formatters ask for, only stop gets out
+    template <typename U, typename Fmt>
+    constexpr void nested(U &v, Fmt fmt) const {
         if (action == visit::stop)
             return;
 
         visit a = visit::step_in;
-        root::fmt(with<info{}>(v, a));
+        fmt(with<info{}>(v, a));
         if (a == visit::stop)
             action = visit::stop;
     }
@@ -310,15 +214,9 @@ struct formatter_context {
     }
 };
 
-template <typename Root, fmt_direction D, typename T, typename Cursor, typename ...Entries>
+template <typename Root, typename T, typename Cursor, typename ...Entries>
 constexpr auto make_context(T &v, Cursor &r, visit &a, std::tuple<Entries...> &s) {
-    return formatter_context<Root, D, T, info{}, Cursor, Entries...>{v, r, a, s};
-}
-
-template <bool Const, typename Rg>
-constexpr auto subrange_of(Rg &r) {
-    if constexpr (Const) return std::ranges::subrange(std::ranges::cbegin(r), std::ranges::cend(r));
-    else                 return std::ranges::subrange(r);
+    return formatter_context<Root, T, info{}, Cursor, Entries...>{v, r, a, s};
 }
 
 // a base's priority is inherited, except the built-in ones' impl:
@@ -332,38 +230,9 @@ consteval priority priority_of(info t) {
     return priority::mid;
 }
 
-} // namespace detail
-
-template <typename Ctx>
-concept parsable_into = Ctx::direction == fmt_direction::format_value or
-                        not std::is_const_v<typename Ctx::value_type>;
-
-// ctx.value can be changed: parsing, or formatting a copy
-template <typename Ctx>
-concept mutable_value = not std::is_const_v<typename Ctx::value_type>;
-
-template <typename Ctx, typename Parse, typename Format = detail::no_callback>
-constexpr decltype(auto) direction_split(Ctx ctx, Parse &&parse, Format &&format = {}) {
-    if constexpr (Ctx::direction == fmt_direction::parse_value) return std::forward<Parse>(parse)(ctx);
-    else                                                        return std::forward<Format>(format)(ctx);
-}
-
-namespace detail {
 template <typename R>
 concept overridden = not std::same_as<R, no_callback>;
 
-template <typename F, typename Ctx>
-concept pre_fmt_takes_const = requires (typename Ctx::const_type c) { F::pre_fmt(c); };
-
-// a formatter writing a value it changes first works on a copy of it:
-// one overriding value_side, or whose pre_fmt only takes a mutable value
-template <typename F, typename Ctx>
-concept formats_from_copy =
-    Ctx::direction == fmt_direction::format_value and
-    requires (typename Ctx::mutable_type c) {
-        requires overridden<decltype(F::value_side(c))> or
-                 (overridden<decltype(F::pre_fmt(c))> and not pre_fmt_takes_const<F, Ctx>);
-    };
 }
 
 template <auto P, typename T, template <auto, typename> typename Derived>
@@ -373,13 +242,17 @@ struct base_formatter {
 
     using storage_t = void;
 
-    static constexpr void fmt(auto) { }
+    // the value's own part: read(T &value, ctx) and write(const T &value, ctx).
+    // its members are read before it and written after it
+    static constexpr void read(auto &, auto) { }
+    static constexpr void write(const auto &, auto) { }
 
     // no_callback tells the root the hook isn't overridden
-    static constexpr detail::no_callback pre_fmt(auto)     { return {}; }
-    static constexpr detail::no_callback post_fmt(auto)    { return {}; }
-    static constexpr detail::no_callback value_side(auto)  { return {}; }
-    static constexpr detail::no_callback buffer_side(auto) { return {}; }
+    // on_value is called before write and after read
+    // on_stream is the same but vice-versa
+    // a formatter overriding on_value writes a copy of a const value, changed by it
+    static constexpr detail::no_callback on_value(auto)     { return {}; }
+    static constexpr detail::no_callback on_stream(auto)    { return {}; }
 };
 
 namespace detail {
@@ -411,7 +284,7 @@ struct [[=priority::impl(0)]] base_primitive_formatter : base_formatter<P, T, ba
     static constexpr bool in_memory = params_of<P>.endianness == std::endian::native or sizeof(T) == 1;
 
     template <typename Ctx>
-    static constexpr void value_side(Ctx ctx) {
+    static constexpr void on_value(Ctx ctx) {
         if constexpr (not in_memory) {
             using U = uint_of_size<sizeof(T)>;
             ctx.value = std::bit_cast<T>(std::byteswap(std::bit_cast<U>(ctx.value)));
@@ -519,52 +392,63 @@ private:
     using fmt_of = [: formatter_for(Ctx::type) :];
 
     template <typename Ctx>
-    static consteval bool dispatchable() { return requires(Ctx c) { fmt_of<Ctx>::fmt(c); }; }
+    static consteval bool readable() {
+        return not std::is_const_v<typename Ctx::value_type> and
+               requires(Ctx c) { fmt_of<Ctx>::read(c.value, c); };
+    }
+
+    template <typename Ctx>
+    static consteval bool writable() {
+        return requires(Ctx c) { fmt_of<Ctx>::write(std::as_const(c.value), c); };
+    }
 
 public:
     static consteval bool check_type(info m) { return formatter_for(m) != info{}; }
 
     template <typename Ctx>
-        requires (formatter_for(Ctx::type) != info{} and parsable_into<Ctx> and dispatchable<Ctx>())
-    static constexpr void fmt(Ctx ctx) {
+        requires (formatter_for(Ctx::type) != info{} and readable<Ctx>())
+    static constexpr void read(Ctx ctx) {
         using F = fmt_of<Ctx>;
 
-        if constexpr (formats_from_copy<F, Ctx>) {
-            std::remove_cv_t<typename Ctx::value_type> copy = ctx.value;
-            fmt_sides<F>(ctx.with(copy));
+        F::on_stream(ctx);
+        if (!each_member<F>(ctx, [](auto c) { read(c); }))
+            return;
+        F::read(ctx.value, ctx);
+        if (proceeds(ctx))
+            F::on_value(ctx);
+    }
+
+    template <typename Ctx>
+        requires (formatter_for(Ctx::type) != info{} and writable<Ctx>())
+    static constexpr void write(Ctx ctx) {
+        using F = fmt_of<Ctx>;
+        using V = std::remove_cv_t<typename Ctx::value_type>;
+
+        if constexpr (std::is_const_v<typename Ctx::value_type> and
+                      overridden<decltype(F::on_value(ctx.with(std::declval<V &>())))>) {
+            V copy = ctx.value;
+            write_value<F>(ctx.with(copy));
         } else
-            fmt_sides<F>(ctx);
+            write_value<F>(ctx);
     }
 
 private:
     template <typename F, typename Ctx>
-    static constexpr void fmt_sides(Ctx ctx) {
-        direction_split(ctx,
-            [](auto c) { F::buffer_side(c); if (fmt_value<F>(c)) F::value_side(c); },
-            [](auto c) { F::value_side(c);  if (fmt_value<F>(c)) F::buffer_side(c); });
+    static constexpr void write_value(Ctx ctx) {
+        F::on_value(ctx);
+        F::write(std::as_const(ctx.value), ctx);
+        if (proceeds(ctx) and each_member<F>(ctx, [](auto c) { write(c); }))
+            F::on_stream(ctx);
     }
 
-    // parsed value's members come first, a formatted value's last.
-    // false if ctx.action cut the value short
-    template <typename F, typename Ctx>
-    static constexpr bool fmt_value(Ctx ctx) {
-        F::pre_fmt(ctx);
-        bool done = direction_split(ctx,
-            [](auto c) { return fmt_each_member<F>(c) and fmt_self<F>(c); },
-            [](auto c) { return fmt_self<F>(c) and fmt_each_member<F>(c); });
-        if (done)
-            F::post_fmt(ctx);
-        return done;
-    }
-
-    template <typename F, typename Ctx>
-    static constexpr bool fmt_self(Ctx ctx) {
-        F::fmt(ctx);
+    template <typename Ctx>
+    static constexpr bool proceeds(Ctx ctx) {
         return ctx.action != visit::stop and ctx.action != visit::step_up;
     }
 
-    template <typename F, typename Ctx>
-    static constexpr bool fmt_each_member(Ctx ctx) {
+    // false if ctx.action cut the value short
+    template <typename F, typename Ctx, typename Fmt>
+    static constexpr bool each_member(Ctx ctx, [[maybe_unused]] Fmt fmt) {
         if (ctx.action != visit::step_in)
             return ctx.action == visit::next;
 
@@ -611,12 +495,35 @@ public:
     template <typename T>
     using storage_for = [: substitute(^^std::tuple, storage_entries(^^T)) :];
 
-    template <fmt_direction D, typename T, typename Rg>
-    static constexpr size_t fmt(T &v, Rg &r) {
+private:
+    template <typename T, typename Sb>
+    using context_for = decltype(make_context<formatter>(
+        std::declval<T &>(), std::declval<cursor<Sb> &>(),
+        std::declval<visit &>(), std::declval<storage_for<T> &>()));
+
+public:
+    // sb is a std::streambuf, or anything else with its char_type, sgetn() and sputn()
+    template <typename T, typename Sb, typename B = std::remove_reference_t<Sb>>
+        requires input_streambuf<B> and (check_type(^^T)) and
+                 requires(context_for<T, B> c) { read(c); }
+    static constexpr std::size_t read(T &v, Sb &&sb) {
+        return run(v, sb, [](auto c) { read(c); });
+    }
+
+    template <typename T, typename Sb, typename B = std::remove_reference_t<Sb>>
+        requires output_streambuf<B> and (check_type(^^T)) and
+                 requires(context_for<const T, B> c) { write(c); }
+    static constexpr std::size_t write(const T &v, Sb &&sb) {
+        return run(v, sb, [](auto c) { write(c); });
+    }
+
+private:
+    template <typename T, typename Sb, typename Fmt>
+    static constexpr std::size_t run(T &v, Sb &sb, Fmt fmt) {
         storage_for<T> storage;
-        auto cur    = detail::make_cursor(r);
+        cursor cur{sb};
         auto action = visit::step_in;
-        fmt(detail::make_context<formatter, D>(v, cur, action, storage));
+        fmt(make_context<formatter>(v, cur, action, storage));
         return cur.position();
     }
 };
