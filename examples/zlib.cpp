@@ -27,7 +27,7 @@ struct lz::fmt::hook<Ctx> {
         extract<zlib_compressed>(annotations_of_with_type(Ctx::subject, ^^zlib_compressed)[0]);
 
     static void read(auto &v, Ctx ctx) {
-        std::uint32_t size, deflated_size;
+        std::uint32_t size = 0, deflated_size = 0;
         ctx.read(size);
         ctx.read(deflated_size);
 

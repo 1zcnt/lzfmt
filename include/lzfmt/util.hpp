@@ -28,12 +28,14 @@
 
 namespace lz::fmt {
 
-// like std::meta::annotations_of_with_type, for annotations of any
-// specialization of the class template templ
+// like std::meta::annotations_of_with_type, for annotations of any specialization
+// of the class template templ. empty for a null reflection
 consteval std::vector<std::meta::info> annotations_of_with_template(std::meta::info item, std::meta::info templ) {
     std::vector<std::meta::info> result;
+    if (item == std::meta::info{})
+        return result;
     for (auto a : annotations_of(item)) {
-        auto t = dealias(remove_cv(type_of(a)));
+        auto t = is_type(a) ? a : type_of(a);
         if (has_template_arguments(t) and template_of(t) == templ)
             result.push_back(a);
     }

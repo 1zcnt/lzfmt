@@ -14,10 +14,8 @@ struct length_prefixed_t { };
 template <std::integral N>
 inline constexpr length_prefixed_t<N> length_prefixed;
 
-// the N a member is annotated with, if it is: values that aren't members have no such subject
+// the N a member is annotated with, if it is
 consteval std::meta::info prefix_of(std::meta::info subject) {
-    //if (!is_nonstatic_data_member(subject))
-    //    return {};
     auto a = lz::fmt::annotations_of_with_template(subject, ^^length_prefixed_t);
     return a.empty() ? std::meta::info{} : template_arguments_of(type_of(a[0]))[0];
 }
@@ -29,7 +27,7 @@ struct lz::fmt::hook<Ctx> {
     using N = [: prefix_of(Ctx::subject) :];
 
     static constexpr void read(auto &v, Ctx ctx) {
-        N n;
+        N n{};
         ctx.read(n);
         v.resize(n);
         for (auto &e : v)
