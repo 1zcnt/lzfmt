@@ -17,7 +17,57 @@ builds the tests.
 
 ## Examples
 
-See `examples/` 
+See [examples](examples)
+
+[zlib example](examples/zlib.cpp):
+```cpp
+struct chunk {
+    std::uint32_t id;
+    [[=zlib_compressed{}]]           std::array<std::uint8_t, 4096>  blocks;
+    [[=zlib_compressed{.level = 9}]] std::array<std::uint16_t, 1024> heights;
+    std::uint8_t  flags;
+};
+
+
+chunk c{.id = 7, .blocks = {}, .heights = {}, .flags = 1};
+// fill it...
+fmt::write(c, buf)
+```
+
+[hooks example(length-prefixed container)](examples/length_prefixed.cpp):
+```cpp
+// taken by the root over the formatter's read and write, for the contexts of such members
+template <typename Ctx>
+requires (prefix_of(Ctx::subject) != std::meta::info{})
+struct lz::fmt::hook<Ctx> {
+using N = [: prefix_of(Ctx::subject) :];
+
+    static constexpr void read(auto &v, Ctx ctx) {
+        N n{};
+        ctx.read(n);
+        v.resize(n);
+        for (auto &e : v)
+            ctx.read(e);
+    }
+
+    static constexpr void write(const auto &v, Ctx ctx) {
+        ctx.write(static_cast<N>(v.size()));
+        for (auto &e : v)
+            ctx.write(e);
+    }
+};
+
+
+struct user {
+    std::uint32_t id;
+    [[=length_prefixed<std::uint8_t>]]  std::string                name;
+    [[=length_prefixed<std::uint16_t>]] std::vector<std::uint16_t> scores;
+};
+
+
+fmt::write(user{7, "ada", {90, 75}}, buf);
+```
+
 
 ## Input
 
