@@ -29,7 +29,7 @@ int main() {
     try {
         for (;;) {
             sample s;
-            fmt::read(s, *file.rdbuf());
+            fmt::read(s, file);
             std::println("t={} position={}", s.time, s.position);
         }
     } catch (const std::length_error &) {

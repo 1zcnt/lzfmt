@@ -102,6 +102,17 @@ concept output_streambuf = requires(Sb &sb, const typename Sb::char_type *p, std
     { sb.sputn(p, n) } -> std::convertible_to<std::streamsize>;
 };
 
+// a stream is used through its buffer: rdbuf() gives a pointer to it
+template <typename S>
+concept input_stream = requires(S s) {
+    requires input_streambuf<std::remove_reference_t<decltype(*s.rdbuf())>>;
+};
+
+template <typename S>
+concept output_stream = requires(S s) {
+    requires output_streambuf<std::remove_reference_t<decltype(*s.rdbuf())>>;
+};
+
 template <typename Sb>
 concept streambuf_like = input_streambuf<Sb> or output_streambuf<Sb>;
 
@@ -510,6 +521,16 @@ private:
         std::declval<visit &>(), std::declval<storage_for<T> &>()));
 
 public:
+    template <typename T, input_stream S>
+    static constexpr std::size_t read(T &v, S &&s) {
+        return read(v, *s.rdbuf());
+    }
+
+    template <typename T, output_stream S>
+    static constexpr std::size_t write(const T &v, S &&s) {
+        return write(v, *s.rdbuf());
+    }
+
     // sb is a std::streambuf, or anything else with its char_type, sgetn() and sputn()
     template <typename T, typename Sb, typename B = std::remove_reference_t<Sb>>
         requires input_streambuf<B> and (check_type(^^T)) and

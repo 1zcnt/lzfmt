@@ -92,10 +92,10 @@ static void streambuf_like() {
     static_assert(can_parse<le, std::uint16_t, counting_buf>);
     static_assert(!can_format<le, std::uint16_t, counting_buf>);
 
-    // ranges and streams aren't stream buffers
+    // a stream is taken for its buffer; a range isn't one
     static_assert(parses_from<counting_buf>);
+    static_assert(parses_from<std::stringstream>);
     static_assert(!parses_from<std::vector<std::uint8_t>>);
-    static_assert(!parses_from<std::stringstream>);
 }
 
 // running out of input or output throws, sized or not
