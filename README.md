@@ -1,5 +1,9 @@
 # lzfmt
 
+[![tests](https://github.com/1zcnt/lzfmt/actions/workflows/tests.yml/badge.svg)](https://github.com/1zcnt/lzfmt/actions/workflows/tests.yml)
+![Static Badge](https://img.shields.io/badge/Linux%20Droidvalds-approved-green?logo=redhat)
+![Static Badge](https://img.shields.io/badge/Virus%20GCC-installed-green?logo=gnu)
+
 A header-only C++26 serialization library built on static reflection.
 
 Types are read and written by *formatters*: small templates chosen at compile
