@@ -288,7 +288,11 @@ consteval bool has_bit_fields(info t) {
 }
 
 template <typename T>
-concept member_wise = std::is_class_v<T> and not has_bit_fields(^^T);
+concept member_wise =
+    std::is_class_v<T> and
+    // how do we arrange base members?
+    bases_of(^^T, mctx).empty() and not
+    has_bit_fields(^^T);
 
 template <auto P, primitive<P> T>
 struct [[=priority::impl(0)]] base_primitive_formatter : base_formatter<P, T, base_primitive_formatter> {
